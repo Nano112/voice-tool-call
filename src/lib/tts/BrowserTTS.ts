@@ -23,8 +23,8 @@ export class BrowserTTS {
 
   speak(text: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      if (!window.speechSynthesis) {
-        reject(new Error("Speech synthesis not supported"));
+      if (typeof window === "undefined" || !window.speechSynthesis) {
+        resolve(); // Silently skip in Node
         return;
       }
 
@@ -53,6 +53,8 @@ export class BrowserTTS {
   }
 
   stop() {
-    window.speechSynthesis?.cancel();
+    if (typeof window !== "undefined") {
+      window.speechSynthesis?.cancel();
+    }
   }
 }

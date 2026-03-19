@@ -10,7 +10,15 @@ export default defineConfig({
       fileName: (format) => `voice-tool-call.${format === "es" ? "mjs" : "cjs"}`,
     },
     rollupOptions: {
-      external: ["kokoro-js"],
+      external: [
+        "kokoro-js",
+        "node-llama-cpp",
+        "@huggingface/transformers",
+        "child_process",
+        "os",
+        "fs",
+        "path",
+      ],
     },
     outDir: "dist",
     sourcemap: true,

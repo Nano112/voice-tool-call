@@ -9,7 +9,7 @@ export type {
   IntentMode, TTSMode, TTSStatus, WakeWordState,
 } from "./types";
 
-// Sub-modules for advanced users
+// Browser-safe sub-modules
 export { WakeWordListener } from "./stt/WakeWordListener";
 export { listenForCommand, createSpeechRecognition } from "./stt/SpeechRecognition";
 export { BrowserTTS } from "./tts/BrowserTTS";
@@ -24,3 +24,9 @@ export { createLanguageModelInterpreter, isLanguageModelAvailable } from "./inte
 export { detectCapabilities, detectDetailedCapabilities, requestMicrophoneAccess, getMicrophonePermission, getLanguageModelStatus } from "./detect";
 export type { DetailedCapabilities, FeatureStatus } from "./detect";
 export { TypedEventEmitter } from "./EventEmitter";
+
+// Node-only modules — use dynamic import or import from "voice-tool-call/node"
+// export { createLlamaCppInterpreter } from "./intent/LlamaCppInterpreter";
+// export { warmUpWhisper, transcribeFile, ... } from "./stt/WhisperSTT";
+export type { LlamaCppConfig } from "./intent/LlamaCppInterpreter";
+export type { WhisperConfig } from "./stt/WhisperSTT";

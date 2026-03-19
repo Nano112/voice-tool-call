@@ -24,7 +24,7 @@ export type IntentInput = {
   context: AppContext;
 };
 
-export type IntentMode = "local" | "api" | "language-model";
+export type IntentMode = "local" | "api" | "language-model" | "llama-cpp";
 export type TTSMode = "browser" | "kokoro";
 export type TTSStatus = "generating" | "speaking" | "done";
 export type WakeWordState = "idle" | "listening" | "activated" | "processing";

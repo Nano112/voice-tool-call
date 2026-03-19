@@ -1,6 +1,6 @@
 {
   "name": "voice-tool-call",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Voice-to-tool-call browser library: wake word detection, speech-to-text, LLM intent interpretation, tool execution, and text-to-speech",
   "type": "module",
   "main": "dist/voice-tool-call.cjs",
@@ -16,6 +16,11 @@
         "types": "./dist/types/index.d.ts",
         "default": "./dist/voice-tool-call.cjs"
       }
+    },
+    "./node": {
+      "import": "./src/lib/node.ts",
+      "require": "./src/lib/node.ts",
+      "types": "./src/lib/node.ts"
     }
   },
   "files": [
@@ -30,6 +35,8 @@
     "build:example": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "demo:server": "bun examples/node/server.ts",
+    "demo:cli": "bun examples/node/cli.ts",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -56,10 +63,14 @@
     "url": "https://github.com/Nano112/voice-tool-call/issues"
   },
   "peerDependencies": {
-    "kokoro-js": "^1.2.1"
+    "kokoro-js": "^1.2.1",
+    "node-llama-cpp": "^3.18.0"
   },
   "peerDependenciesMeta": {
     "kokoro-js": {
+      "optional": true
+    },
+    "node-llama-cpp": {
       "optional": true
     }
   },
@@ -69,11 +80,13 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.0",
+    "electron": "^41.0.3",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
     "kokoro-js": "^1.2.1",
+    "node-llama-cpp": "^3.18.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "typescript": "~5.9.3",

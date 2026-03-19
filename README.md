@@ -228,11 +228,68 @@ For on-device AI intent matching with no API key:
 
 The library auto-detects and switches from keyword matching to AI.
 
+## Node.js / Bun
+
+The library works server-side with a local LLM (Metal/CUDA accelerated) instead of Chrome's LanguageModel API.
+
+```bash
+npm install voice-tool-call node-llama-cpp
+```
+
+```ts
+import { VoiceToolSystem } from 'voice-tool-call';
+
+const system = new VoiceToolSystem({
+  intent: 'llama-cpp',        // Local LLM with Metal/CUDA
+  autoSpeak: false,            // No speaker in Node
+  autoDetect: false,
+  llamaCpp: {
+    gpuLayers: -1,             // Offload all layers to GPU
+    // model: 'path/to/custom.gguf',  // Optional custom model
+  },
+});
+
+system.registerTool('deploy', {
+  description: 'Deploy the application',
+  parameters: { env: 'string' },
+  keywords: ['deploy', 'ship'],
+  examples: [{ input: 'deploy to staging', arguments: { env: 'staging' } }],
+  handler: ({ env }) => `Deployed to ${env}`,
+});
+
+await system.start();  // Downloads Qwen2.5-0.5B (~400MB) on first run
+const results = await system.processText('deploy to production');
+```
+
+### Node-only imports
+
+Node-specific modules (Whisper STT, llama-cpp) are in a separate entry point to keep the browser bundle clean:
+
+```ts
+// Browser-safe (main entry)
+import { VoiceToolSystem } from 'voice-tool-call';
+
+// Node-only (Whisper, llama-cpp, mic recording)
+import { warmUpWhisper, transcribeFile, createLlamaCppInterpreter } from 'voice-tool-call/node';
+```
+
+### Server with voice UI
+
+The Node server example streams mic audio from a browser, processes everything server-side (Whisper STT + LLM + Kokoro TTS):
+
+```bash
+bun run demo:server
+# Opens browser → mic streams to server → Whisper → LLM → tools → Kokoro → audio back
+```
+
+See [`examples/node/server.ts`](./examples/node/server.ts) for the full implementation.
+
 ## Advanced: Individual Modules
 
 Import individual pieces for custom pipelines:
 
 ```ts
+// Browser
 import {
   WakeWordListener,
   listenForCommand,
@@ -243,15 +300,26 @@ import {
   KokoroTTSEngine,
   TTSManager,
 } from 'voice-tool-call';
+
+// Node/Bun
+import {
+  createLlamaCppInterpreter,
+  warmUpWhisper,
+  transcribeFile,
+} from 'voice-tool-call/node';
 ```
 
-## Framework Support
+## Examples
 
-The library is framework-agnostic — works with React, Vue, Svelte, vanilla JS, Laravel Blade, or anything that runs in a browser.
+| Example | Command | Description |
+|---|---|---|
+| React (browser) | `bun dev` | Full browser demo with wake word, Kokoro TTS, Chrome AI |
+| Node server | `bun run demo:server` | Server-side voice pipeline with browser mic UI |
+| Node CLI | `bun run demo:cli` | Interactive text REPL with OS tools |
 
-For React, see the example app in [`examples/react/`](./examples/react/).
+## Platform Support
 
-## Browser Support
+### Browser
 
 | Feature | Chrome | Edge | Firefox | Safari |
 |---|---|---|---|---|
@@ -260,6 +328,14 @@ For React, see the example app in [`examples/react/`](./examples/react/).
 | WebGPU (Kokoro accel) | 113+ | 113+ | Nightly | Preview |
 | Speech Synthesis | ✓ | ✓ | ✓ | ✓ |
 | Kokoro TTS (WASM) | ✓ | ✓ | ✓ | ✓ |
+
+### Node.js / Bun
+
+| Feature | Support |
+|---|---|
+| LLM (node-llama-cpp) | Metal (macOS), CUDA (Linux/Windows), Vulkan, CPU |
+| Whisper STT | Via @huggingface/transformers |
+| Kokoro TTS | CPU (via onnxruntime-node) |
 
 Best experience: **Chrome 131+** with LanguageModel flags enabled.
 

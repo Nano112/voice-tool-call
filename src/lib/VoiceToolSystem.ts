@@ -37,6 +37,7 @@ export type VoiceToolConfig = {
   apiUrl?: string;
   apiKey?: string;
   kokoro?: { dtype?: string; device?: string; voice?: string };
+  llamaCpp?: { model?: string; gpuLayers?: number; contextSize?: number };
   autoDetect?: boolean;
   autoSpeak?: boolean;
   commandTimeout?: number;
@@ -54,6 +55,7 @@ export class VoiceToolSystem extends TypedEventEmitter<VoiceToolEventMap> {
   private wakeWordListener: WakeWordListener | null = null;
   private interpreter: IntentInterpreter;
   private lmInterpreter: IntentInterpreter | null = null;
+  private llamaCppInterpreter: any | null = null; // LlamaCppInterpreter type
   private localInterpreter: IntentInterpreter;
   private apiInterpreter: IntentInterpreter | null = null;
   private intentMode: IntentMode;
@@ -134,18 +136,28 @@ export class VoiceToolSystem extends TypedEventEmitter<VoiceToolEventMap> {
     this.running = true;
     this.emit("state", { running: true });
 
-    // Start wake word listener IMMEDIATELY — don't wait for models
-    this.startWakeWord();
+    const isBrowser = typeof window !== "undefined";
 
-    // Load everything else in the background
-    if (this.config.autoDetect) {
-      const caps = await detectCapabilities();
-      this.emit("ready", { capabilities: caps });
+    // Start wake word listener IMMEDIATELY (browser only)
+    if (isBrowser) {
+      this.startWakeWord();
+    }
 
-      // Load LM and Kokoro in parallel
+    // Load models in the background
+    const caps = this.config.autoDetect
+      ? (isBrowser ? await detectCapabilities() : { speechRecognition: false, languageModel: false, webGPU: false, speechSynthesis: false })
+      : { speechRecognition: false, languageModel: false, webGPU: false, speechSynthesis: false };
+    this.emit("ready", { capabilities: caps });
+
+    {
       const tasks: Promise<void>[] = [];
 
-      if (caps.languageModel && this.config.intent !== "api") {
+      // Intent: pick the best available LLM
+      if (this.config.intent === "llama-cpp" || (!isBrowser && this.config.intent !== "api")) {
+        // Node/Bun: use node-llama-cpp with Metal/CUDA
+        tasks.push(this.loadLlamaCpp());
+      } else if (isBrowser && caps.languageModel && this.config.intent !== "api") {
+        // Browser: use Chrome LanguageModel (Gemini Nano)
         tasks.push(
           (async () => {
             try {
@@ -164,6 +176,7 @@ export class VoiceToolSystem extends TypedEventEmitter<VoiceToolEventMap> {
         );
       }
 
+      // TTS: Kokoro works in both browser and Node
       if (this.config.tts === "kokoro") {
         tasks.push(
           (async () => {
@@ -194,8 +207,11 @@ export class VoiceToolSystem extends TypedEventEmitter<VoiceToolEventMap> {
     return this.running;
   }
 
-  destroy(): void {
+  async destroy(): Promise<void> {
     this.stop();
+    if (this.llamaCppInterpreter?.dispose) {
+      await this.llamaCppInterpreter.dispose();
+    }
     this.removeAllListeners();
   }
 
@@ -246,6 +262,9 @@ export class VoiceToolSystem extends TypedEventEmitter<VoiceToolEventMap> {
       case "language-model":
         if (this.lmInterpreter) this.interpreter = this.lmInterpreter;
         break;
+      case "llama-cpp":
+        if (this.llamaCppInterpreter) this.interpreter = this.llamaCppInterpreter;
+        break;
       case "api":
         if (this.apiInterpreter) this.interpreter = this.apiInterpreter;
         break;
@@ -272,6 +291,26 @@ export class VoiceToolSystem extends TypedEventEmitter<VoiceToolEventMap> {
   }
 
   // --- Internal ---
+
+  private async loadLlamaCpp(): Promise<void> {
+    try {
+      this.emit("loading", { module: "llama-cpp", status: "loading" });
+      const { createLlamaCppInterpreter } = await import("./intent/LlamaCppInterpreter");
+      const llm = createLlamaCppInterpreter(this.config.llamaCpp);
+      await llm.warmUp();
+      this.llamaCppInterpreter = llm;
+      this.interpreter = llm;
+      this.intentMode = "llama-cpp";
+      this.emit("intent:mode", { mode: "llama-cpp" });
+      this.emit("loading", { module: "llama-cpp", status: "ready" });
+    } catch (err) {
+      this.emit("loading", { module: "llama-cpp", status: "error" });
+      this.emit("error", {
+        error: `Failed to load llama-cpp: ${err instanceof Error ? err.message : String(err)}`,
+        source: "llama-cpp",
+      });
+    }
+  }
 
   private startWakeWord(): void {
     if (this.wakeWordListener) return;
@@ -315,13 +354,14 @@ export class VoiceToolSystem extends TypedEventEmitter<VoiceToolEventMap> {
       const results = this.executor.executeAll(toolCalls);
       this.emit("executed", results);
 
-      // Feed history to LM interpreter for conversation memory
+      // Feed history to LM/llama interpreter for conversation memory
       const resultStr = results
         .map((r) => (typeof r.result === "string" ? r.result : ""))
         .filter(Boolean)
         .join("; ");
-      if (this.lmInterpreter && "addToHistory" in this.lmInterpreter) {
-        (this.lmInterpreter as LanguageModelInterpreter).addToHistory(text, toolCalls, resultStr || undefined);
+      const activeInterpreter = this.lmInterpreter ?? this.llamaCppInterpreter;
+      if (activeInterpreter && "addToHistory" in activeInterpreter) {
+        activeInterpreter.addToHistory(text, toolCalls, resultStr || undefined);
       }
 
       // Auto-speak string results
