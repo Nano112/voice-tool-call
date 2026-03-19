@@ -1,15 +1,15 @@
-// Main facade
+// Main facade — works in both browser and Node
 export { VoiceToolSystem } from "./VoiceToolSystem";
-export type { VoiceToolConfig, VoiceToolEventMap } from "./VoiceToolSystem";
+export type { VoiceToolConfig, VoiceToolEventMap, SceneDefinition } from "./VoiceToolSystem";
 
-// Types
+// Types — universal
 export type {
   Transcript, ToolDefinition, ToolCall, AppContext, IntentInput,
   RegisterToolOptions, ToolExecutionResult, Capabilities,
   IntentMode, TTSMode, TTSStatus, WakeWordState,
 } from "./types";
 
-// Browser-safe sub-modules
+// Sub-modules — browser-safe, also work in Node
 export { WakeWordListener } from "./stt/WakeWordListener";
 export { listenForCommand, createSpeechRecognition } from "./stt/SpeechRecognition";
 export { BrowserTTS } from "./tts/BrowserTTS";
@@ -25,8 +25,19 @@ export { detectCapabilities, detectDetailedCapabilities, requestMicrophoneAccess
 export type { DetailedCapabilities, FeatureStatus } from "./detect";
 export { TypedEventEmitter } from "./EventEmitter";
 
-// Node-only modules — use dynamic import or import from "voice-tool-call/node"
-// export { createLlamaCppInterpreter } from "./intent/LlamaCppInterpreter";
-// export { warmUpWhisper, transcribeFile, ... } from "./stt/WhisperSTT";
+// Types for Node-only modules (always safe to export)
 export type { LlamaCppConfig } from "./intent/LlamaCppInterpreter";
 export type { WhisperConfig } from "./stt/WhisperSTT";
+
+/**
+ * Async loaders for Node-only modules.
+ * These use dynamic import() so they don't break browser bundles.
+ * In the browser, they throw a clear error.
+ */
+export async function loadWhisper() {
+  return import("./stt/WhisperSTT");
+}
+
+export async function loadLlamaCpp() {
+  return import("./intent/LlamaCppInterpreter");
+}

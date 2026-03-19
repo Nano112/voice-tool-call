@@ -8,7 +8,7 @@ import { WakeWordListener } from "./stt/WakeWordListener";
 import { listenForCommand } from "./stt/SpeechRecognition";
 import { createLocalInterpreter } from "./intent/LocalInterpreter";
 import { createApiInterpreter } from "./intent/ApiInterpreter";
-import { createLanguageModelInterpreter, type LanguageModelInterpreter } from "./intent/LanguageModelInterpreter";
+import { createLanguageModelInterpreter } from "./intent/LanguageModelInterpreter";
 import type { IntentInterpreter } from "./intent/types";
 import { TTSManager } from "./tts/TTSManager";
 import { ToolExecutor } from "./executor/ToolExecutor";
@@ -24,9 +24,19 @@ export type VoiceToolEventMap = {
   "tts:mode": { mode: TTSMode };
   "intent:mode": { mode: IntentMode };
   "loading": { module: string; status: "loading" | "ready" | "error" };
+  "scene": { scene: string };
   "error": { error: string; source?: string };
   "state": { running: boolean };
   "ready": { capabilities: Capabilities };
+};
+
+export type SceneDefinition = {
+  tools: Record<string, RegisterToolOptions>;
+  context?: AppContext;
+  /** Called when entering this scene */
+  onEnter?: () => void;
+  /** Called when leaving this scene */
+  onExit?: () => void;
 };
 
 export type VoiceToolConfig = {
@@ -50,6 +60,9 @@ export class VoiceToolSystem extends TypedEventEmitter<VoiceToolEventMap> {
 
   private context: AppContext = {};
   private toolDefs: ToolDefinition[] = [];
+  private globalToolNames = new Set<string>(); // Tools that persist across scenes
+  private scenes = new Map<string, SceneDefinition>();
+  private currentScene: string | null = null;
   private executor = new ToolExecutor();
   private ttsManager: TTSManager;
   private wakeWordListener: WakeWordListener | null = null;
@@ -113,6 +126,94 @@ export class VoiceToolSystem extends TypedEventEmitter<VoiceToolEventMap> {
 
   getToolDefinitions(): ToolDefinition[] {
     return [...this.toolDefs];
+  }
+
+  /**
+   * Remove a tool by name.
+   */
+  unregisterTool(name: string): void {
+    this.toolDefs = this.toolDefs.filter((t) => t.name !== name);
+    this.globalToolNames.delete(name);
+  }
+
+  /**
+   * Remove all tools, or only non-global ones.
+   */
+  clearTools(options?: { keepGlobal?: boolean }): void {
+    if (options?.keepGlobal) {
+      this.toolDefs = this.toolDefs.filter((t) => this.globalToolNames.has(t.name));
+    } else {
+      this.toolDefs = [];
+      this.globalToolNames.clear();
+    }
+  }
+
+  /**
+   * Mark a tool as global — it persists across scene changes.
+   * Call after registerTool.
+   */
+  setGlobal(name: string): void {
+    this.globalToolNames.add(name);
+  }
+
+  /**
+   * Register a tool that persists across all scenes.
+   */
+  registerGlobalTool(name: string, options: RegisterToolOptions): void {
+    this.registerTool(name, options);
+    this.globalToolNames.add(name);
+  }
+
+  // --- Scenes ---
+
+  /**
+   * Define a named scene with its own tools and context.
+   */
+  defineScene(name: string, scene: SceneDefinition): void {
+    this.scenes.set(name, scene);
+  }
+
+  /**
+   * Switch to a scene. Replaces non-global tools and merges context.
+   */
+  setScene(name: string): void {
+    const scene = this.scenes.get(name);
+    if (!scene) throw new Error("Unknown scene: " + name);
+
+    // Exit current scene
+    if (this.currentScene) {
+      this.scenes.get(this.currentScene)?.onExit?.();
+    }
+
+    // Remove non-global tools
+    this.clearTools({ keepGlobal: true });
+
+    // Register scene tools
+    this.registerTools(scene.tools);
+
+    // Merge scene context
+    if (scene.context) {
+      this.context = { ...this.context, ...scene.context };
+    }
+
+    this.currentScene = name;
+    this.emit("scene", { scene: name });
+
+    scene.onEnter?.();
+  }
+
+  /**
+   * Get the current scene name.
+   */
+  getScene(): string | null {
+    return this.currentScene;
+  }
+
+  /**
+   * Get all defined scene names.
+   */
+  getScenes(): string[] {
+    return Array.from(this.scenes.keys());
   }
 
   // --- Context ---

@@ -1,30 +1,186 @@
-import { useState, useCallback, useEffect } from "react";
-import type { AppContext } from "voice-tool-call";
-import { detectDetailedCapabilities, requestMicrophoneAccess, type DetailedCapabilities } from "voice-tool-call";
+import { useState, useCallback, useEffect, useRef } from "react";
+import type { VoiceToolSystem as VTSystem } from "voice-tool-call";
 import { useVoiceToolSystem } from "./hooks/useVoiceToolSystem";
-import { VoiceButton } from "./components/VoiceButton";
 import { EventLog, type LogEntry } from "./components/EventLog";
-import { ContextPanel } from "./components/ContextPanel";
-import { TextInput } from "./components/TextInput";
 import { ToastContainer, type ToastMessage } from "./components/Toast";
 
 let toastId = 0;
 
-function App() {
-  const [context, setContext] = useState<AppContext>({
-    cameras: [
-      { id: "cam1", name: "overhead", description: "top-down view" },
-      { id: "cam2", name: "desk", description: "front desk view" },
-      { id: "cam3", name: "whiteboard", description: "whiteboard capture" },
+// --- Page definitions as scenes ---
+
+function registerScenes(system: VTSystem, setPage: (p: string) => void) {
+
+  // Global tools — available on ALL pages
+  system.registerGlobalTool("navigate", {
+    description: "Navigate to a different page",
+    parameters: { page: "string" },
+    keywords: ["go to", "open", "navigate", "switch", "page"],
+    examples: [
+      { input: "go to the dashboard", arguments: { page: "dashboard" } },
+      { input: "open the music player", arguments: { page: "player" } },
+      { input: "go to settings", arguments: { page: "settings" } },
     ],
-    activeCamera: "cam1",
+    handler: ({ page }) => {
+      const name = page.toLowerCase().trim();
+      if (system.getScenes().includes(name)) {
+        system.setScene(name);
+        setPage(name);
+        return "Navigated to " + name + ".";
+      }
+      return "Unknown page: " + page + ". Available: " + system.getScenes().join(", ") + ".";
+    },
   });
+
+  system.registerGlobalTool("chat", {
+    description: "Respond conversationally when no other tool matches",
+    parameters: { message: "string" },
+    examples: [
+      { input: "hello", arguments: { message: "Hello! I can navigate pages, control the player, adjust settings, and more." } },
+      { input: "what page am I on", arguments: { message: "Let me check..." } },
+      { input: "what can you do", arguments: { message: "I can navigate between pages, control music, adjust settings, and manage your dashboard." } },
+    ],
+    handler: ({ message }) => message,
+  });
+
+  system.registerGlobalTool("currentPage", {
+    description: "Tell the user which page they're on and what they can do here",
+    parameters: {},
+    keywords: ["where", "which page", "what page"],
+    examples: [{ input: "where am I", arguments: {} }],
+    handler: () => {
+      const scene = system.getScene();
+      const tools = system.getToolDefinitions().filter(t => !["navigate", "chat", "currentPage"].includes(t.name));
+      return "You're on the " + scene + " page. Available actions: " + tools.map(t => t.description.toLowerCase()).join(", ") + ".";
+    },
+  });
+
+  // --- Dashboard Scene ---
+  system.defineScene("dashboard", {
+    context: { currentPage: "dashboard", widgets: ["revenue", "users", "orders"] },
+    tools: {
+      viewWidget: {
+        description: "View or focus on a dashboard widget",
+        parameters: { widget: "string" },
+        keywords: ["show", "view", "widget", "chart", "graph"],
+        examples: [
+          { input: "show me the revenue chart", arguments: { widget: "revenue" } },
+          { input: "view users", arguments: { widget: "users" } },
+        ],
+        handler: ({ widget }) => "Focused on the " + widget + " widget.",
+      },
+      refreshData: {
+        description: "Refresh the dashboard data",
+        parameters: {},
+        keywords: ["refresh", "reload", "update"],
+        examples: [{ input: "refresh the dashboard", arguments: {} }],
+        handler: () => "Dashboard data refreshed.",
+      },
+      exportReport: {
+        description: "Export a report as CSV or PDF",
+        parameters: { format: "string" },
+        keywords: ["export", "download", "report", "csv", "pdf"],
+        examples: [
+          { input: "export as csv", arguments: { format: "csv" } },
+          { input: "download the report", arguments: { format: "pdf" } },
+        ],
+        handler: ({ format }) => "Exported report as " + (format || "pdf").toUpperCase() + ".",
+      },
+    },
+  });
+
+  // --- Player Scene ---
+  system.defineScene("player", {
+    context: {
+      currentPage: "player",
+      queue: [{ id: "1", title: "Bohemian Rhapsody" }, { id: "2", title: "Stairway to Heaven" }],
+      nowPlaying: "Bohemian Rhapsody",
+      paused: false,
+    },
+    tools: {
+      play: {
+        description: "Play a song by title",
+        parameters: { query: "string" },
+        keywords: ["play", "put on", "listen"],
+        examples: [
+          { input: "play something chill", arguments: { query: "chill vibes" } },
+          { input: "play bohemian rhapsody", arguments: { query: "bohemian rhapsody" } },
+        ],
+        handler: ({ query }) => "Now playing: \"" + query + "\".",
+      },
+      skip: {
+        description: "Skip to the next song",
+        parameters: {},
+        keywords: ["skip", "next"],
+        examples: [{ input: "next song", arguments: {} }],
+        handler: () => "Skipped to next track.",
+      },
+      pause: {
+        description: "Pause or resume playback",
+        parameters: {},
+        keywords: ["pause", "resume", "stop"],
+        examples: [{ input: "pause the music", arguments: {} }],
+        handler: () => "Toggled playback.",
+      },
+      setVolume: {
+        description: "Set the volume level (0-100)",
+        parameters: { level: "number" },
+        keywords: ["volume", "louder", "quieter", "mute"],
+        examples: [
+          { input: "turn it up", arguments: { level: 80 } },
+          { input: "mute", arguments: { level: 0 } },
+        ],
+        handler: ({ level }) => (level ?? 50) === 0 ? "Muted." : "Volume set to " + (level ?? 50) + "%.",
+      },
+    },
+  });
+
+  // --- Settings Scene ---
+  system.defineScene("settings", {
+    context: { currentPage: "settings", theme: "dark", notifications: true, language: "en" },
+    tools: {
+      setTheme: {
+        description: "Change the app theme",
+        parameters: { theme: "string" },
+        keywords: ["theme", "dark", "light", "mode"],
+        examples: [
+          { input: "switch to light mode", arguments: { theme: "light" } },
+          { input: "dark theme", arguments: { theme: "dark" } },
+        ],
+        handler: ({ theme }) => "Theme changed to " + theme + ".",
+      },
+      toggleNotifications: {
+        description: "Turn notifications on or off",
+        parameters: { enabled: "boolean" },
+        keywords: ["notifications", "alerts", "notify"],
+        examples: [
+          { input: "turn off notifications", arguments: { enabled: false } },
+          { input: "enable alerts", arguments: { enabled: true } },
+        ],
+        handler: ({ enabled }) => "Notifications " + (enabled ? "enabled" : "disabled") + ".",
+      },
+      setLanguage: {
+        description: "Change the app language",
+        parameters: { language: "string" },
+        keywords: ["language", "locale", "french", "spanish", "english"],
+        examples: [
+          { input: "switch to french", arguments: { language: "fr" } },
+          { input: "set language to spanish", arguments: { language: "es" } },
+        ],
+        handler: ({ language }) => "Language set to " + language + ".",
+      },
+    },
+  });
+}
+
+// --- Main App ---
+
+function App() {
+  const [page, setPage] = useState("dashboard");
   const [events, setEvents] = useState<LogEntry[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [detailed, setDetailed] = useState<DetailedCapabilities | null>(null);
-  const [micGranted, setMicGranted] = useState(false);
   const [moduleStatus, setModuleStatus] = useState<Record<string, string>>({});
+  const initialized = useRef(false);
 
   const { system, wakeState } = useVoiceToolSystem({
     tts: "kokoro",
@@ -45,183 +201,31 @@ function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // Detect capabilities on mount
+  
+
   useEffect(() => {
-    detectDetailedCapabilities().then((caps) => {
-      setDetailed(caps);
-      setMicGranted(caps.microphone.status === "granted");
-    });
-  }, []);
+    if (!system || initialized.current) return;
+    initialized.current = true;
 
-  // Register tools and wire events once system is ready
-  useEffect(() => {
-    if (!system) return;
+    registerScenes(system, setPage);
+    system.setScene("dashboard"); // Start on dashboard
 
-    system.setContext(context);
-
-    system.registerTool("selectCamera", {
-      description: "Switch the active camera view",
-      parameters: { cameraId: "string" },
-      keywords: ["camera", "switch", "view", "show", "see", "look", "go to"],
-      examples: [
-        { input: "switch to the desk camera", arguments: { cameraId: "cam2" } },
-        { input: "show me the overhead", arguments: { cameraId: "cam1" } },
-        { input: "go to whiteboard", arguments: { cameraId: "cam3" } },
-      ],
-      handler: ({ cameraId }) => {
-        setContext((prev) => ({ ...prev, activeCamera: cameraId }));
-        system.updateContext({ activeCamera: cameraId });
-        const cameras = context.cameras as any[];
-        const cam = cameras?.find((c: any) => c.id === cameraId);
-        return cam ? `Switched to the ${cam.name} camera.` : `Switched to camera ${cameraId}.`;
-      },
-    });
-
-    system.registerTool("toggleRecording", {
-      description: "Start or stop recording",
-      parameters: { enabled: "boolean" },
-      keywords: ["record", "start", "stop", "begin", "end", "pause"],
-      examples: [
-        { input: "start recording", arguments: { enabled: true } },
-        { input: "stop recording", arguments: { enabled: false } },
-      ],
-      handler: ({ enabled }) => (enabled ? "Recording started." : "Recording stopped."),
-    });
-
-    system.registerTool("listCameras", {
-      description: "List all available cameras and which one is active",
-      parameters: {},
-      keywords: ["cameras", "available", "list"],
-      examples: [
-        { input: "what cameras are available", arguments: {} },
-        { input: "list the cameras", arguments: {} },
-      ],
-      handler: () => {
-        const ctx = system.getContext();
-        const cameras = ctx.cameras as any[];
-        const names = cameras.map((c: any) => `${c.name}${c.id === ctx.activeCamera ? " (active)" : ""}`).join(", ");
-        return `Available cameras: ${names}.`;
-      },
-    });
-
-    system.registerTool("getActiveCamera", {
-      description: "Get the currently active camera",
-      parameters: {},
-      keywords: ["current", "active", "which one", "selected"],
-      examples: [{ input: "which camera am I on", arguments: {} }],
-      handler: () => {
-        const ctx = system.getContext();
-        const cameras = ctx.cameras as any[];
-        const cam = cameras?.find((c: any) => c.id === ctx.activeCamera);
-        return cam ? `The active camera is ${cam.name}${cam.description ? `, the ${cam.description}` : ""}.` : "No camera is currently active.";
-      },
-    });
-
-    system.registerTool("setBackgroundColor", {
-      description: "Change the page background color",
-      parameters: { color: "string" },
-      keywords: ["background", "color", "theme", "dark", "light", "red", "blue", "green", "purple", "pink"],
-      examples: [
-        { input: "make the background red", arguments: { color: "#dc2626" } },
-        { input: "change background to blue", arguments: { color: "#2563eb" } },
-        { input: "set it to green", arguments: { color: "#16a34a" } },
-        { input: "go dark", arguments: { color: "#0f0f1a" } },
-        { input: "make it purple", arguments: { color: "#7c3aed" } },
-        { input: "light mode", arguments: { color: "#f8fafc" } },
-      ],
-      handler: ({ color }) => {
-        document.body.style.background = color;
-        const root = document.getElementById("root")?.firstElementChild as HTMLElement | null;
-        if (root) root.style.background = color;
-        // Auto-adjust text color for light backgrounds
-        const isLight = parseInt(color.replace("#", ""), 16) > 0x888888;
-        if (root) root.style.color = isLight ? "#1e1e2e" : "#e2e8f0";
-        return `Background changed to ${color}.`;
-      },
-    });
-
-    system.registerTool("setFontSize", {
-      description: "Change the base font size of the page",
-      parameters: { size: "string" },
-      keywords: ["font", "size", "text", "bigger", "smaller", "large", "small", "tiny", "huge"],
-      examples: [
-        { input: "make the text bigger", arguments: { size: "18px" } },
-        { input: "smaller text please", arguments: { size: "12px" } },
-        { input: "set font size to 20", arguments: { size: "20px" } },
-        { input: "make it huge", arguments: { size: "24px" } },
-        { input: "tiny text", arguments: { size: "10px" } },
-        { input: "normal size", arguments: { size: "14px" } },
-      ],
-      handler: ({ size }) => {
-        document.documentElement.style.fontSize = size;
-        return `Font size set to ${size}.`;
-      },
-    });
-
-    system.registerTool("playSound", {
-      description: "Play a tone at a given frequency and duration",
-      parameters: { frequency: "number", duration: "number" },
-      keywords: ["sound", "tone", "beep", "play", "note", "buzz", "ping"],
-      examples: [
-        { input: "play a beep", arguments: { frequency: 440, duration: 300 } },
-        { input: "play a low tone", arguments: { frequency: 200, duration: 500 } },
-        { input: "play a high note", arguments: { frequency: 880, duration: 200 } },
-        { input: "buzz", arguments: { frequency: 100, duration: 1000 } },
-      ],
-      handler: ({ frequency, duration }) => {
-        const ctx = new AudioContext();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.frequency.value = frequency ?? 440;
-        gain.gain.value = 0.3;
-        osc.connect(gain).connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + (duration ?? 300) / 1000);
-        return `Playing ${frequency ?? 440}Hz tone for ${duration ?? 300}ms.`;
-      },
-    });
-
-    system.registerTool("chat", {
-      description: "Respond conversationally when no other tool matches",
-      parameters: { message: "string" },
-      examples: [
-        { input: "two plus two", arguments: { message: "Two plus two is four." } },
-        { input: "hello", arguments: { message: "Hello! How can I help you?" } },
-        { input: "tell me a joke", arguments: { message: "Why did the camera go to therapy? It couldn't focus." } },
-      ],
-      handler: ({ message }) => message,
-    });
-
-    system.on("transcript", (t) => addLog("transcript", `"${t.text}" (confidence: ${(t.confidence ?? 0).toFixed(2)})`));
+    // Wire events
+    system.on("transcript", (t) => addLog("transcript", '"' + t.text + '" (confidence: ' + (t.confidence ?? 0).toFixed(2) + ')'));
     system.on("intent", (i) => addLog("intent", JSON.stringify(i, null, 2)));
-    system.on("executed", (r) => addLog("executed", r.map((x) => `${x.tool}(${JSON.stringify(x.arguments)}) → ${x.error ?? "OK"}`).join(", ")));
+    system.on("executed", (r) => addLog("executed", r.map((x) => x.tool + "(" + JSON.stringify(x.arguments) + ") → " + (x.error ?? "OK")).join(", ")));
     system.on("response", (r) => addLog("response", r.text));
     system.on("tts:status", (s) => addLog("tts", s.status));
+    system.on("scene", (s) => addLog("info", "Scene: " + s.scene));
     system.on("loading", (l) => {
-      addLog("info", `${l.module}: ${l.status}`);
+      addLog("info", l.module + ": " + l.status);
       setModuleStatus((prev) => ({ ...prev, [l.module]: l.status }));
-      if (l.status === "ready") addToast(`${l.module} ready!`, "success");
-      if (l.status === "error") addToast(`${l.module} failed to load`, "error");
+      if (l.status === "ready") addToast(l.module + " ready!", "success");
     });
     system.on("error", (e) => { addLog("error", e.error); addToast(e.error, "error"); });
 
     system.start();
   }, [system]);
-
-  useEffect(() => {
-    system?.setContext(context);
-  }, [context, system]);
-
-  const handleRequestMic = useCallback(async () => {
-    const granted = await requestMicrophoneAccess();
-    setMicGranted(granted);
-    if (granted) {
-      addToast("Microphone access granted!", "success");
-      detectDetailedCapabilities().then(setDetailed);
-    } else {
-      addToast("Microphone access denied. Voice features won't work.", "error");
-    }
-  }, [addToast]);
 
   const handleTextSubmit = useCallback(async (text: string) => {
     if (!system) return;
@@ -230,41 +234,49 @@ function App() {
   }, [system]);
 
   const stateLabel =
-    wakeState === "activated" ? "Wake word detected — listening for command..."
+    wakeState === "activated" ? "Wake word detected — listening..."
     : wakeState === "listening" ? 'Listening for "Hey Assistant"...'
     : null;
 
+  const pages = ["dashboard", "player", "settings"];
+
   return (
-    <div style={{ minHeight: "100vh", background: "#0f0f1a", color: "#e2e8f0", display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 20px", gap: "24px", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#0f0f1a", color: "#e2e8f0", display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 20px", gap: "20px", fontFamily: "system-ui" }}>
       <ToastContainer messages={toasts} onDismiss={dismissToast} />
 
-      <h1 style={{ margin: 0, fontSize: "24px", fontWeight: 600 }}>Voice Tool Calling</h1>
-      <p style={{ margin: 0, color: "#64748b", fontSize: "14px" }}>
-        Say <strong style={{ color: "#a78bfa" }}>"Hey Assistant"</strong> + a command, hold{" "}
-        <strong style={{ color: "#a78bfa" }}>Space</strong>, or type below.
+      <h1 style={{ margin: 0, fontSize: "24px", fontWeight: 600 }}>Voice Tool Call — Multi-Page Demo</h1>
+      <p style={{ margin: 0, color: "#64748b", fontSize: "13px" }}>
+        Say <b style={{ color: "#a78bfa" }}>"Hey Assistant"</b> + command. Tools change per page.
       </p>
 
-      {/* Capabilities Panel */}
-      {/* Loading Status Bar */}
+      {/* Status */}
       <div style={{ display: "flex", gap: "16px", fontSize: "12px", color: "#64748b", background: "#1e1e2e", padding: "10px 20px", borderRadius: "8px", flexWrap: "wrap", justifyContent: "center" }}>
         <StatusDot label="Wake Word" status={wakeState === "listening" || wakeState === "activated" ? "active" : "starting..."} />
         <StatusDot label="AI Intent" status={moduleStatus["language-model"] ?? "waiting..."} />
         <StatusDot label="Kokoro TTS" status={moduleStatus["kokoro"] ?? "waiting..."} />
       </div>
 
-      {detailed && <CapabilitiesPanel detailed={detailed} micGranted={micGranted} onRequestMic={handleRequestMic} />}
+      {/* Page tabs */}
+      <div style={{ display: "flex", gap: "4px", background: "#1e1e2e", borderRadius: "10px", padding: "4px" }}>
+        {pages.map((p) => (
+          <button
+            key={p}
+            onClick={() => { system?.setScene(p); setPage(p); }}
+            style={{
+              padding: "10px 24px", borderRadius: "8px", border: "none",
+              background: page === p ? "#3b82f6" : "transparent",
+              color: page === p ? "white" : "#64748b",
+              fontSize: "14px", fontWeight: page === p ? 600 : 400, cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+          >
+            {p.charAt(0).toUpperCase() + p.slice(1)}
+          </button>
+        ))}
+      </div>
 
-      <ContextPanel context={context} />
-
-      <VoiceButton
-        onPress={async () => {
-          if (!system) return;
-          if (!micGranted) { await handleRequestMic(); return; }
-          setIsProcessing(true);
-          try { await system.pushToTalk(); } catch {} finally { setIsProcessing(false); }
-        }}
-        isListening={isProcessing || wakeState === "activated"}
-      />
+      {/* Current page info */}
+      <PageContent page={page} />
 
       {stateLabel && (
         <div style={{ display: "flex", alignItems: "center", gap: "8px", color: wakeState === "activated" ? "#22c55e" : "#64748b", fontSize: "13px" }}>
@@ -273,7 +285,22 @@ function App() {
         </div>
       )}
 
-      <TextInput onSubmit={handleTextSubmit} disabled={isProcessing || !system} />
+      {/* Text input */}
+      <div style={{ display: "flex", gap: "8px", width: "100%", maxWidth: "640px" }}>
+        <input
+          id="cmd"
+          type="text"
+          placeholder={'Try: "go to player" or "show the revenue chart"'}
+          disabled={isProcessing}
+          onKeyDown={(e) => { if (e.key === "Enter") { const t = (e.target as HTMLInputElement).value.trim(); if (t) { handleTextSubmit(t); (e.target as HTMLInputElement).value = ""; } } }}
+          style={{ flex: 1, padding: "10px 14px", borderRadius: "8px", border: "1px solid #3d3d4f", background: "#1e1e2e", color: "#e2e8f0", fontSize: "14px", outline: "none" }}
+        />
+        <button
+          onClick={() => { const el = document.getElementById("cmd") as HTMLInputElement; const t = el.value.trim(); if (t) { handleTextSubmit(t); el.value = ""; } }}
+          style={{ padding: "10px 20px", borderRadius: "8px", border: "none", background: "#8b5cf6", color: "white", fontSize: "14px", cursor: "pointer" }}
+        >Send</button>
+      </div>
+
       <EventLog events={events} />
 
       {events.length > 0 && (
@@ -287,87 +314,48 @@ function App() {
   );
 }
 
-// --- Capabilities Panel ---
+// --- Page content panels ---
 
-const statusIcons: Record<string, string> = {
-  available: "✓", granted: "✓", active: "✓",
-  downloadable: "↓", loading: "⟳",
-  "needs-flags": "⚑", prompt: "?",
-  unavailable: "✗", denied: "✗", "unsupported-browser": "✗",
-};
-const statusColors: Record<string, string> = {
-  available: "#22c55e", granted: "#22c55e", active: "#22c55e",
-  downloadable: "#f59e0b", loading: "#f59e0b",
-  "needs-flags": "#f59e0b", prompt: "#3b82f6",
-  unavailable: "#64748b", denied: "#ef4444", "unsupported-browser": "#64748b",
-};
-
-function CapabilitiesPanel({
-  detailed, micGranted, onRequestMic,
-}: {
-  detailed: DetailedCapabilities; micGranted: boolean; onRequestMic: () => void;
-}) {
-  const [expanded, setExpanded] = useState<string | null>(null);
-
-  type Feature = { key: string; label: string; status: string; instructions?: string; action?: () => void; actionLabel?: string };
-
-  const features: Feature[] = [
-    { key: "microphone", label: "Microphone", status: detailed.microphone.status, action: !micGranted && detailed.microphone.status === "prompt" ? onRequestMic : undefined, actionLabel: "Grant Access" },
-    { key: "speechRecognition", label: "Speech Recognition", status: detailed.speechRecognition.status, instructions: detailed.speechRecognition.instructions },
-    { key: "languageModel", label: "On-Device AI (Gemini Nano)", status: detailed.languageModel.status, instructions: detailed.languageModel.instructions },
-    { key: "webGPU", label: "WebGPU Acceleration", status: detailed.webGPU.status, instructions: detailed.webGPU.instructions },
-    { key: "speechSynthesis", label: "Speech Synthesis", status: detailed.speechSynthesis.status },
-  ];
+function PageContent({ page }: { page: string }) {
+  const panels: Record<string, { icon: string; title: string; tools: string[] }> = {
+    dashboard: { icon: "📊", title: "Dashboard", tools: ["viewWidget", "refreshData", "exportReport"] },
+    player: { icon: "🎵", title: "Music Player", tools: ["play", "skip", "pause", "setVolume"] },
+    settings: { icon: "⚙️", title: "Settings", tools: ["setTheme", "toggleNotifications", "setLanguage"] },
+  };
+  const p = panels[page];
+  if (!p) return null;
 
   return (
-    <div style={{ background: "#1e1e2e", borderRadius: "8px", padding: "14px 18px", width: "100%", maxWidth: "640px", fontSize: "13px" }}>
-      <div style={{ color: "#94a3b8", fontSize: "12px", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "10px" }}>
-        System Capabilities
+    <div style={{ background: "#1e1e2e", borderRadius: "10px", padding: "20px", width: "100%", maxWidth: "640px" }}>
+      <div style={{ fontSize: "18px", fontWeight: 600, marginBottom: "8px" }}>{p.icon} {p.title}</div>
+      <div style={{ color: "#64748b", fontSize: "13px", marginBottom: "12px" }}>
+        Available voice commands on this page:
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-        {features.map((f) => (
-          <div key={f.key}>
-            <div
-              style={{ display: "flex", alignItems: "center", gap: "8px", cursor: f.instructions ? "pointer" : "default" }}
-              onClick={() => f.instructions && setExpanded(expanded === f.key ? null : f.key)}
-            >
-              <span style={{ color: statusColors[f.status] ?? "#64748b", fontWeight: 600, width: "16px", textAlign: "center" }}>
-                {statusIcons[f.status] ?? "?"}
-              </span>
-              <span style={{ color: "#e2e8f0", flex: 1 }}>{f.label}</span>
-              <span style={{ color: statusColors[f.status] ?? "#64748b", fontSize: "11px" }}>
-                {f.status}
-              </span>
-              {f.action && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); f.action!(); }}
-                  style={{ padding: "3px 10px", borderRadius: "4px", border: "none", background: "#3b82f6", color: "white", fontSize: "11px", cursor: "pointer" }}
-                >
-                  {f.actionLabel}
-                </button>
-              )}
-              {f.instructions && (
-                <span style={{ color: "#475569", fontSize: "11px" }}>{expanded === f.key ? "▲" : "▼"}</span>
-              )}
-            </div>
-            {expanded === f.key && f.instructions && (
-              <div style={{ marginLeft: "24px", marginTop: "4px", padding: "8px 12px", background: "#16162a", borderRadius: "4px", color: "#94a3b8", fontSize: "12px", lineHeight: "1.5" }}>
-                {f.instructions}
-              </div>
-            )}
-          </div>
+      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+        {p.tools.map((t) => (
+          <span key={t} style={{ padding: "4px 12px", borderRadius: "6px", background: "#2d2d3f", color: "#a78bfa", fontSize: "12px" }}>{t}</span>
         ))}
+        <span style={{ padding: "4px 12px", borderRadius: "6px", background: "#1a3a2a", color: "#34d399", fontSize: "12px" }}>navigate</span>
+        <span style={{ padding: "4px 12px", borderRadius: "6px", background: "#1a3a2a", color: "#34d399", fontSize: "12px" }}>chat</span>
       </div>
     </div>
   );
 }
 
+// --- Status dot ---
+
+const statusColors: Record<string, string> = {
+  available: "#22c55e", active: "#22c55e", ready: "#22c55e",
+  loading: "#f59e0b", "waiting...": "#f59e0b", "starting...": "#f59e0b",
+  unavailable: "#64748b", error: "#ef4444",
+};
+
 function StatusDot({ label, status }: { label: string; status: string }) {
-  const color = statusColors[status] ?? (status.includes("wait") || status.includes("start") ? "#f59e0b" : "#475569");
-  const isLoading = status === "loading" || status.includes("wait") || status.includes("start");
+  const color = statusColors[status] ?? "#475569";
+  const isLoading = status.includes("wait") || status.includes("start") || status === "loading";
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-      <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: color, animation: isLoading ? "pulse 1s infinite" : "none", boxShadow: status === "active" || status === "ready" ? `0 0 6px ${color}` : "none" }} />
+      <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: color, animation: isLoading ? "pulse 1s infinite" : "none", boxShadow: status === "active" || status === "ready" ? "0 0 6px " + color : "none" }} />
       <span>{label}: <span style={{ color }}>{status}</span></span>
     </div>
   );

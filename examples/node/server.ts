@@ -34,9 +34,10 @@ if (typeof globalThis.DecompressionStream === "undefined") {
  * Run: bun examples/node/server.ts
  */
 
-import { VoiceToolSystem } from "../../src/lib/node";
-import { warmUpWhisper, transcribeFile } from "../../src/lib/node";
-import { KokoroTTSEngine } from "../../src/lib/tts/KokoroTTS";
+import { VoiceToolSystem, loadWhisper, KokoroTTSEngine } from "../../src/lib/index";
+
+// Whisper functions loaded async at startup
+let whisper: Awaited<ReturnType<typeof loadWhisper>>;
 import { tmpdir } from "os";
 import { join } from "path";
 import { writeFileSync, unlinkSync, existsSync } from "fs";
@@ -53,7 +54,6 @@ const system = new VoiceToolSystem({
 
 const WAKE_WORDS = ["hey assistant", "hey computer"];
 const SILENCE_THRESHOLD_MS = 1500; // How long silence before processing a chunk
-const MIN_AUDIO_MS = 500; // Minimum audio duration to bother transcribing
 
 // --- Tools ---
 
@@ -181,7 +181,7 @@ async function transcribeAudio(audioData: Buffer): Promise<string> {
   try { unlinkSync(tempIn); } catch {}
 
   if (!existsSync(tempWav)) return "";
-  const transcript = await transcribeFile(tempWav);
+  const transcript = await whisper.transcribeFile(tempWav);
   return transcript.text;
 }
 
@@ -196,110 +196,6 @@ function matchesWakeWord(text: string): { matched: boolean; remainder: string } 
   return { matched: false, remainder: "" };
 }
 
-// Per-client audio session
-class AudioSession {
-  private chunks: Buffer[] = [];
-  private lastChunkTime = 0;
-  private silenceTimer: ReturnType<typeof setTimeout> | null = null;
-  private activated = false; // wake word heard, waiting for command
-  private processing = false;
-  private send: (msg: any) => void;
-
-  constructor(send: (msg: any) => void) {
-    this.send = send;
-  }
-
-  addChunk(data: Buffer) {
-    this.chunks.push(data);
-    this.lastChunkTime = Date.now();
-
-    // Reset silence timer
-    if (this.silenceTimer) clearTimeout(this.silenceTimer);
-    this.silenceTimer = setTimeout(() => this.onSilence(), SILENCE_THRESHOLD_MS);
-  }
-
-  private async onSilence() {
-    if (this.processing || this.chunks.length === 0) return;
-    this.processing = true;
-
-    const audioBuffer = Buffer.concat(this.chunks);
-    this.chunks = [];
-
-    // Skip very short audio
-    if (audioBuffer.length < 1000) {
-      this.processing = false;
-      return;
-    }
-
-    try {
-      const text = await transcribeAudio(audioBuffer);
-      if (!text || text.length < 2) {
-        this.processing = false;
-        return;
-      }
-
-      console.log("Heard: \"" + text + "\"");
-      this.send({ type: "transcript", text });
-
-      if (this.activated) {
-        // We already heard the wake word — this is the command
-        console.log("  Command: \"" + text + "\"");
-        this.activated = false;
-        this.send({ type: "status", text: "Processing command..." });
-        await this.executeCommand(text);
-      } else {
-        // Check for wake word
-        const { matched, remainder } = matchesWakeWord(text);
-        if (matched) {
-          if (remainder) {
-            // Wake word + command in one utterance
-            console.log("  Wake + command: \"" + remainder + "\"");
-            this.send({ type: "wakeword", activated: true });
-            this.send({ type: "status", text: "Processing: " + remainder });
-            await this.executeCommand(remainder);
-          } else {
-            // Just wake word, wait for command
-            console.log("  Wake word detected! Listening for command...");
-            this.activated = true;
-            this.send({ type: "wakeword", activated: true });
-            this.send({ type: "status", text: "Listening for command..." });
-          }
-        }
-        // No wake word — ignore (ambient speech)
-      }
-    } catch (err) {
-      console.error("Processing error:", err);
-      this.send({ type: "error", error: String(err) });
-    }
-
-    this.processing = false;
-  }
-
-  private async executeCommand(text: string) {
-    try {
-      const results = await system.processText(text);
-      for (const r of results) {
-        console.log("  => " + r.tool + ": " + (r.error ?? r.result));
-      }
-      this.send({
-        type: "result",
-        results: results.map(r => ({ tool: r.tool, arguments: r.arguments, result: r.result, error: r.error })),
-      });
-    } catch (err) {
-      this.send({ type: "error", error: String(err) });
-    }
-  }
-
-  handleText(text: string) {
-    // Text input bypasses wake word
-    console.log("> \"" + text + "\"");
-    this.executeCommand(text);
-  }
-
-  destroy() {
-    if (this.silenceTimer) clearTimeout(this.silenceTimer);
-  }
-}
 
 // --- HTML ---
 
@@ -399,7 +295,8 @@ async function main() {
   console.log("Loading LLM + Whisper + Kokoro...\n");
   await system.start();
   console.log("LLM ready.");
-  await warmUpWhisper();
+  whisper = await loadWhisper();
+  await whisper.warmUpWhisper();
   console.log("Whisper ready.");
   await kokoro.load();
   console.log("Kokoro TTS ready.\n");
@@ -458,7 +355,7 @@ async function main() {
     writeFileSync(tempWav, pcmToWav(combined, 16000));
 
     try {
-      const transcript = await transcribeFile(tempWav);
+      const transcript = await whisper.transcribeFile(tempWav);
       const text = transcript.text?.trim();
       if (!text || text.length < 2) { client.processing = false; return; }
 
@@ -498,7 +395,7 @@ async function main() {
 
   const server = Bun.serve({
     port: 3456,
-    fetch(req, server) {
+    fetch(req: any, server: any) {
       const url = new URL(req.url);
       if (url.pathname === "/ws") {
         if (server.upgrade(req)) return;
@@ -507,11 +404,11 @@ async function main() {
       return new Response(HTML, { headers: { "Content-Type": "text/html" } });
     },
     websocket: {
-      open(ws) {
+      open(ws: any) {
         clients.set(ws, { speaking: false, activated: false, speechChunks: [], preRoll: [], silenceCount: 0, processing: false });
         console.log("Client connected.");
       },
-      async message(ws, message) {
+      async message(ws: any, message: any) {
         const client = clients.get(ws);
         if (!client) return;
 
@@ -559,7 +456,7 @@ async function main() {
           }
         }
       },
-      close(ws) {
+      close(ws: any) {
         clients.delete(ws);
         console.log("Client disconnected.");
       },

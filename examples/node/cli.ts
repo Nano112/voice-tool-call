@@ -11,8 +11,8 @@
  *  - Real OS tools: open apps, run commands, get system info, etc.
  */
 
-import { VoiceToolSystem } from "../../src/lib/node";
-import { warmUpWhisper, recordUntilEnter, transcribeFile, listAudioDevices, setAudioDevice } from "../../src/lib/node";
+import { VoiceToolSystem } from "../../src/lib/index";
+import { warmUpWhisper, recordUntilEnter, transcribeFile, listAudioDevices, setAudioDevice } from "../../src/lib/index";
 import { execSync } from "child_process";
 import * as os from "os";
 import * as fs from "fs";

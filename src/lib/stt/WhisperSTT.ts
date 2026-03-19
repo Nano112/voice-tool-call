@@ -5,7 +5,7 @@
  */
 
 import type { Transcript } from "../types";
-import { execSync, spawn, type ChildProcess } from "child_process";
+import { spawn } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
 import { unlinkSync, existsSync } from "fs";
