@@ -155,6 +155,7 @@ system.on('tts:status', ({ status }) => {});      // 'generating' | 'speaking' |
 system.on('tts:mode', ({ mode }) => {});          // TTS mode changed
 system.on('intent:mode', ({ mode }) => {});       // intent mode changed
 system.on('loading', ({ module, status }) => {}); // model loading progress
+system.on('scene', ({ scene }) => {});            // scene changed
 system.on('error', ({ error, source }) => {});    // errors
 system.on('state', ({ running }) => {});          // system start/stop
 system.on('ready', ({ capabilities }) => {});     // detected capabilities
@@ -164,27 +165,103 @@ system.on('ready', ({ capabilities }) => {});     // detected capabilities
 
 ```ts
 // Lifecycle
-system.start();                     // Start wake word + auto-detect
-system.stop();                      // Stop listening
-system.destroy();                   // Stop + cleanup
+system.start();                       // Start wake word + auto-detect
+system.stop();                        // Stop listening
+system.destroy();                     // Stop + cleanup
+system.isRunning();                   // Check if running
 
 // Input
-system.processText('do something'); // Process text directly (skip voice)
-system.pushToTalk();                // One-shot voice capture (no wake word)
+system.processText('do something');   // Process text directly (skip voice)
+system.pushToTalk();                  // One-shot voice capture (no wake word)
+
+// Tool management
+system.registerTool('name', {...});   // Register a tool (see above)
+system.registerTools({ a: {...} });   // Register multiple tools
+system.registerGlobalTool('name', {...}); // Register tool that persists across scenes
+system.unregisterTool('name');        // Remove a tool
+system.clearTools();                  // Remove all tools
+system.clearTools({ keepGlobal: true }); // Remove non-global tools only
+system.getToolDefinitions();          // List registered tools
 
 // TTS
-system.speak('Hello');              // Speak via current TTS engine
+system.speak('Hello');                // Speak via current TTS engine
 system.stopSpeaking();
-system.preloadKokoro();             // Pre-download Kokoro model
+system.preloadKokoro();               // Pre-download Kokoro model
 
 // Context (dynamic state passed to LLM)
 system.setContext({ key: 'value' });
 system.updateContext({ key: 'v2' });
+system.getContext();
 
 // Runtime config
 system.setIntentMode('language-model');
+system.getIntentMode();
 system.setTTSMode('kokoro');
+system.getTTSMode();
 system.getCapabilities();
+
+// Node-only async loaders (single import, dynamic loading)
+const { warmUpWhisper, transcribeFile } = await loadWhisper();
+const { createLlamaCppInterpreter } = await loadLlamaCpp();
+```
+
+## Scenes
+
+Scenes let you swap tool sets dynamically based on application state — like pages, modes, or steps in a workflow. Global tools persist across all scenes.
+
+```ts
+// Define scenes with their own tools and context
+system.defineScene('dashboard', {
+  context: { currentPage: 'dashboard' },
+  onEnter: () => console.log('Entered dashboard'),
+  onExit: () => console.log('Left dashboard'),
+  tools: {
+    viewChart: {
+      description: 'View a dashboard chart',
+      parameters: { chart: 'string' },
+      keywords: ['chart', 'view', 'show'],
+      examples: [{ input: 'show revenue chart', arguments: { chart: 'revenue' } }],
+      handler: ({ chart }) => `Showing ${chart} chart.`,
+    },
+    exportReport: {
+      description: 'Export a report',
+      parameters: { format: 'string' },
+      keywords: ['export', 'download', 'report'],
+      examples: [{ input: 'export as pdf', arguments: { format: 'pdf' } }],
+      handler: ({ format }) => `Exported as ${format}.`,
+    },
+  },
+});
+
+system.defineScene('player', {
+  context: { currentPage: 'player', nowPlaying: null },
+  tools: {
+    play: {
+      description: 'Play a song',
+      parameters: { query: 'string' },
+      keywords: ['play', 'listen'],
+      examples: [{ input: 'play some jazz', arguments: { query: 'jazz' } }],
+      handler: ({ query }) => `Playing "${query}".`,
+    },
+  },
+});
+
+// Global tools persist across all scenes
+system.registerGlobalTool('navigate', {
+  description: 'Navigate to a page',
+  parameters: { page: 'string' },
+  keywords: ['go to', 'navigate', 'open'],
+  examples: [{ input: 'go to player', arguments: { page: 'player' } }],
+  handler: ({ page }) => { system.setScene(page); return `Navigated to ${page}.`; },
+});
+
+// Switch scenes — tools swap, global tools stay
+system.setScene('dashboard');  // viewChart + exportReport + navigate
+system.setScene('player');     // play + navigate
+
+// Query scene state
+system.getScene();   // 'player'
+system.getScenes();  // ['dashboard', 'player']
 ```
 
 ## Context
@@ -201,7 +278,7 @@ system.setContext({
 });
 ```
 
-"Switch to parking" resolves to `cam2` because the LLM sees it in context.
+"Switch to parking" resolves to `cam2` because the LLM sees it in context. Context is also set per-scene via `defineScene({ context: {...} })`.
 
 ## Capability Detection
 
