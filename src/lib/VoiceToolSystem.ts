@@ -286,8 +286,9 @@ export class VoiceToolSystem extends TypedEventEmitter<VoiceToolEventMap> {
               this.emit("loading", { module: "kokoro", status: "loading" });
               await this.ttsManager.preloadKokoro();
               this.emit("loading", { module: "kokoro", status: "ready" });
-            } catch {
+            } catch (err) {
               this.emit("loading", { module: "kokoro", status: "error" });
+              this.emit("error", { error: "Kokoro load failed: " + (err instanceof Error ? err.message : String(err)), source: "tts" });
             }
           })()
         );
