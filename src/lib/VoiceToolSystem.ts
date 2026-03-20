@@ -16,6 +16,7 @@ import { detectCapabilities } from "./detect";
 
 export type VoiceToolEventMap = {
   "wakeword": { state: WakeWordState };
+  "stt:interim": { text: string };
   "transcript": Transcript;
   "intent": ToolCall | ToolCall[];
   "executed": ToolExecutionResult[];
@@ -425,6 +426,9 @@ export class VoiceToolSystem extends TypedEventEmitter<VoiceToolEventMap> {
       lang: this.config.lang,
       commandTimeout: this.config.commandTimeout,
       onWakeWord: () => {},
+      onInterim: (text) => {
+        this.emit("stt:interim", { text });
+      },
       onCommand: (transcript) => {
         this.emit("transcript", transcript);
         this.processIntent(transcript.text).catch((err) => {

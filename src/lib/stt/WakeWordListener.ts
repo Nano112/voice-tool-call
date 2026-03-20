@@ -13,6 +13,8 @@ export type WakeWordOptions = {
   onStateChange?: (state: WakeWordState) => void;
   /** Called on error */
   onError?: (error: string) => void;
+  /** Called with interim speech recognition results (for debugging) */
+  onInterim?: (text: string) => void;
   /** Language for recognition */
   lang?: string;
   /** Max silence (ms) after wake word before giving up on command */
@@ -46,6 +48,7 @@ export class WakeWordListener {
       onWakeWord: () => {},
       onStateChange: () => {},
       onError: () => {},
+      onInterim: () => {},
       ...options,
     };
   }
@@ -114,6 +117,9 @@ export class WakeWordListener {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         const text = result[0].transcript;
+
+        // Emit interim text for debugging
+        this.options.onInterim?.(text);
 
         if (this.state === "listening") {
           // Scanning for wake word
