@@ -455,22 +455,27 @@ export class VoiceToolSystem extends TypedEventEmitter<VoiceToolEventMap> {
       const results = this.executor.executeAll(toolCalls);
       this.emit("executed", results);
 
+      // Extract speakable text from results (supports string or { message } objects)
+      const getSpeakable = (result: any): string => {
+        if (typeof result === "string") return result;
+        if (result && typeof result === "object" && typeof result.message === "string") return result.message;
+        return "";
+      };
+
       // Feed history to LM/llama interpreter for conversation memory
-      const resultStr = results
-        .map((r) => (typeof r.result === "string" ? r.result : ""))
-        .filter(Boolean)
-        .join("; ");
+      const resultStr = results.map((r) => getSpeakable(r.result)).filter(Boolean).join("; ");
       const activeInterpreter = this.lmInterpreter ?? this.llamaCppInterpreter;
       if (activeInterpreter && "addToHistory" in activeInterpreter) {
         activeInterpreter.addToHistory(text, toolCalls, resultStr || undefined);
       }
 
-      // Auto-speak string results
+      // Auto-speak results
       if (this.config.autoSpeak) {
         for (const r of results) {
-          if (typeof r.result === "string" && r.result) {
-            this.emit("response", { text: r.result });
-            await this.ttsManager.speak(r.result);
+          const speakable = getSpeakable(r.result);
+          if (speakable) {
+            this.emit("response", { text: speakable });
+            await this.ttsManager.speak(speakable);
           }
         }
       }

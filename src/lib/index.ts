@@ -13,8 +13,13 @@ export type {
 export { WakeWordListener } from "./stt/WakeWordListener";
 export { listenForCommand, createSpeechRecognition } from "./stt/SpeechRecognition";
 export { BrowserTTS } from "./tts/BrowserTTS";
-export { KokoroTTSEngine } from "./tts/KokoroTTS";
 export { TTSManager } from "./tts/TTSManager";
+
+// KokoroTTSEngine uses dynamic import internally but Vite still resolves it.
+// Use loadKokoro() for lazy access instead.
+export async function loadKokoro() {
+  return import("./tts/KokoroTTS");
+}
 export { ToolExecutor } from "./executor/ToolExecutor";
 export type { ToolHandler } from "./executor/ToolExecutor";
 export type { IntentInterpreter } from "./intent/types";
