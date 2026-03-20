@@ -1,5 +1,4 @@
 import { BrowserTTS } from "./BrowserTTS";
-import { KokoroTTSEngine, type KokoroTTSOptions } from "./KokoroTTS";
 
 export type TTSMode = "browser" | "kokoro";
 
@@ -7,7 +6,7 @@ export type TTSStatus = "generating" | "speaking" | "done";
 
 export type TTSManagerOptions = {
   mode?: TTSMode;
-  kokoro?: KokoroTTSOptions;
+  kokoro?: Record<string, any>;
   onModeChange?: (mode: TTSMode) => void;
   onLoadingChange?: (loading: boolean) => void;
   onStatusChange?: (status: TTSStatus) => void;
@@ -16,10 +15,12 @@ export type TTSManagerOptions = {
 /**
  * Unified TTS manager.
  * Falls back to browser TTS while Kokoro loads, then switches automatically.
+ * KokoroTTS is lazy-loaded to avoid pulling kokoro-js into browser bundles.
  */
 export class TTSManager {
   private browserTTS: BrowserTTS;
-  private kokoroTTS: KokoroTTSEngine;
+  private kokoroTTS: any | null = null; // Lazy-loaded KokoroTTSEngine
+  private kokoroOpts: Record<string, any> | undefined;
   private mode: TTSMode;
   private options: TTSManagerOptions;
 
@@ -27,7 +28,7 @@ export class TTSManager {
     this.options = options;
     this.mode = options.mode ?? "browser";
     this.browserTTS = new BrowserTTS({ rate: 1.05 });
-    this.kokoroTTS = new KokoroTTSEngine(options.kokoro);
+    this.kokoroOpts = options.kokoro;
   }
 
   getMode(): TTSMode {
@@ -35,20 +36,23 @@ export class TTSManager {
   }
 
   isKokoroLoaded(): boolean {
-    return this.kokoroTTS.isLoaded();
+    return this.kokoroTTS?.isLoaded() ?? false;
   }
 
   isKokoroLoading(): boolean {
-    return this.kokoroTTS.isLoading();
+    return this.kokoroTTS?.isLoading() ?? false;
   }
 
   /**
-   * Start loading Kokoro in the background.
-   * Once loaded, automatically switches to Kokoro mode.
+   * Lazy-load and initialize KokoroTTSEngine.
    */
   async preloadKokoro(): Promise<void> {
     this.options.onLoadingChange?.(true);
     try {
+      if (!this.kokoroTTS) {
+        const { KokoroTTSEngine } = await import("./KokoroTTS");
+        this.kokoroTTS = new KokoroTTSEngine(this.kokoroOpts);
+      }
       await this.kokoroTTS.load();
       this.mode = "kokoro";
       this.options.onModeChange?.("kokoro");
@@ -63,15 +67,15 @@ export class TTSManager {
   }
 
   setKokoroVoice(voice: string): void {
-    this.kokoroTTS.setVoice(voice);
+    this.kokoroTTS?.setVoice(voice);
   }
 
   async listKokoroVoices(): Promise<string[]> {
-    return this.kokoroTTS.listVoices();
+    return this.kokoroTTS?.listVoices() ?? [];
   }
 
   async speak(text: string): Promise<void> {
-    const useKokoro = this.mode === "kokoro" && this.kokoroTTS.isLoaded();
+    const useKokoro = this.mode === "kokoro" && this.kokoroTTS?.isLoaded();
 
     if (useKokoro) {
       this.options.onStatusChange?.("generating");
@@ -91,6 +95,6 @@ export class TTSManager {
 
   stop(): void {
     this.browserTTS.stop();
-    this.kokoroTTS.stop();
+    this.kokoroTTS?.stop();
   }
 }

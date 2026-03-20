@@ -1,6 +1,6 @@
 {
   "name": "voice-tool-call",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Voice-to-tool-call browser library: wake word detection, speech-to-text, LLM intent interpretation, tool execution, and text-to-speech",
   "type": "module",
   "main": "dist/voice-tool-call.cjs",

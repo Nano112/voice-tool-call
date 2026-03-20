@@ -14,12 +14,6 @@ export { WakeWordListener } from "./stt/WakeWordListener";
 export { listenForCommand, createSpeechRecognition } from "./stt/SpeechRecognition";
 export { BrowserTTS } from "./tts/BrowserTTS";
 export { TTSManager } from "./tts/TTSManager";
-
-// KokoroTTSEngine uses dynamic import internally but Vite still resolves it.
-// Use loadKokoro() for lazy access instead.
-export async function loadKokoro() {
-  return import("./tts/KokoroTTS");
-}
 export { ToolExecutor } from "./executor/ToolExecutor";
 export type { ToolHandler } from "./executor/ToolExecutor";
 export type { IntentInterpreter } from "./intent/types";
@@ -30,19 +24,9 @@ export { detectCapabilities, detectDetailedCapabilities, requestMicrophoneAccess
 export type { DetailedCapabilities, FeatureStatus } from "./detect";
 export { TypedEventEmitter } from "./EventEmitter";
 
-// Types for Node-only modules (always safe to export)
+// Types for Node-only modules (type-only exports are safe)
 export type { LlamaCppConfig } from "./intent/LlamaCppInterpreter";
 export type { WhisperConfig } from "./stt/WhisperSTT";
 
-/**
- * Async loaders for Node-only modules.
- * These use dynamic import() so they don't break browser bundles.
- * In the browser, they throw a clear error.
- */
-export async function loadWhisper() {
-  return import("./stt/WhisperSTT");
-}
-
-export async function loadLlamaCpp() {
-  return import("./intent/LlamaCppInterpreter");
-}
+// Node-only loaders (loadWhisper, loadLlamaCpp, loadKokoro) are in "voice-tool-call/node"
+// Do NOT re-export them here — dynamic import() of Node modules breaks browser bundlers
