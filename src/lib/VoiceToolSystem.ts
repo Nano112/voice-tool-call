@@ -473,13 +473,22 @@ export class VoiceToolSystem extends TypedEventEmitter<VoiceToolEventMap> {
         activeInterpreter.addToHistory(text, toolCalls, resultStr || undefined);
       }
 
-      // Auto-speak results
+      // Auto-speak results — pause wake word to avoid feedback loop
       if (this.config.autoSpeak) {
-        for (const r of results) {
-          const speakable = getSpeakable(r.result);
-          if (speakable) {
+        const speakableResults = results.map((r) => getSpeakable(r.result)).filter(Boolean);
+        if (speakableResults.length > 0) {
+          // Stop wake word listener while speaking
+          this.wakeWordListener?.stop();
+          this.wakeWordListener = null;
+
+          for (const speakable of speakableResults) {
             this.emit("response", { text: speakable });
-            await this.ttsManager.speak(speakable);
+            try { await this.ttsManager.speak(speakable); } catch {}
+          }
+
+          // Restart wake word after speaking
+          if (this.running && typeof window !== "undefined") {
+            this.startWakeWord();
           }
         }
       }
@@ -490,8 +499,13 @@ export class VoiceToolSystem extends TypedEventEmitter<VoiceToolEventMap> {
       this.emit("error", { error, source: "intent" });
 
       if (this.config.autoSpeak) {
+        this.wakeWordListener?.stop();
+        this.wakeWordListener = null;
         const spoken = "Sorry, I didn't understand that command.";
-        await this.ttsManager.speak(spoken);
+        try { await this.ttsManager.speak(spoken); } catch {}
+        if (this.running && typeof window !== "undefined") {
+          this.startWakeWord();
+        }
       }
 
       throw err;
